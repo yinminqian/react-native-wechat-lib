@@ -1,0 +1,10 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "react-native-wechat-lib": ["../src/index"],
+      "react-native-wechat-lib/*": ["../src/*"]
+    }
+  }
+}

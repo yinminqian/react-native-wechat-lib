@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ReactNativeWechatLibModule"],
+    "appDelegateSubscribers": ["ReactNativeWechatLibAppDelegate"]
+  },
+  "android": {
+    "modules": ["com.minqian.wechatlib.ReactNativeWechatLibModule"]
+  }
+}

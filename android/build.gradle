@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.minqian.reactnativewechatlib'
+version = '0.1.0'
+
+android {
+  namespace "com.minqian.reactnativewechatlib"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+    consumerProguardFiles 'proguard-rules.pro'
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  implementation 'com.tencent.mm.opensdk:wechat-sdk-android:6.8.34'
+  implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+}
