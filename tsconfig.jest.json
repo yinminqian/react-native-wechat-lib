@@ -3,8 +3,12 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
+    "moduleDetection": "auto",
+    "verbatimModuleSyntax": false,
+    "isolatedModules": false,
     "types": ["jest", "node"],
-    "noUnusedLocals": false
+    "noUnusedLocals": false,
+    "noUncheckedIndexedAccess": false
   },
   "include": ["./src", "./__tests__", "./plugin/src"]
 }

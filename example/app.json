@@ -29,7 +29,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      ["../app.plugin", {
+      ["../app.plugin.js", {
         "appId": "wxYOUR_APPID_HERE",
         "universalLink": "https://your.domain.com/wechat/"
       }]

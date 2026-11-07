@@ -1,162 +1,162 @@
 import {
-  ConfigPlugin,
+  type AndroidConfig,
+  type ConfigPlugin,
   createRunOncePlugin,
-} from '@expo/config-plugins';
+  type InfoPlist,
+  withAndroidManifest,
+  withDangerousMod,
+  withEntitlementsPlist,
+  withInfoPlist,
+} from 'expo/config-plugins';
 import * as fs from 'fs';
 import * as path from 'path';
 
 export interface WithWeChatProps {
+  /** 微信开放平台 AppID，形如 wx1234567890abcdef */
   appId: string;
+  /**
+   * iOS Universal Link，与微信开放平台登记的一致，须以 / 结尾。
+   * 提供后会写入 Info.plist 并把其域名加入 Associated Domains。
+   */
   universalLink?: string;
 }
 
+const PLUGIN_NAME = '@minqian/react-native-wechat-lib';
 const REQUIRED_QUERY_SCHEMES = ['weixin', 'weixinULAPI', 'weixinURLParamsAPI'];
+const WECHAT_PACKAGE = 'com.tencent.mm';
 
-function applyPlistMods(plist: Record<string, any>, props: WithWeChatProps): void {
-  plist.CFBundleURLTypes = plist.CFBundleURLTypes ?? [];
-  const already = (plist.CFBundleURLTypes as any[]).find(
-    (t: any) =>
-      Array.isArray(t.CFBundleURLSchemes) && t.CFBundleURLSchemes.includes(props.appId),
-  );
-  if (!already) {
-    plist.CFBundleURLTypes.push({
-      CFBundleURLName: 'weixin',
-      CFBundleURLSchemes: [props.appId],
-    });
+/** 纯函数：向 Info.plist 写入 URL scheme、查询白名单与 Universal Link */
+export function applyInfoPlist(plist: InfoPlist, props: WithWeChatProps): InfoPlist {
+  const urlTypes: NonNullable<InfoPlist['CFBundleURLTypes']> = plist.CFBundleURLTypes ?? [];
+  const hasScheme = urlTypes.some((type) => type.CFBundleURLSchemes.includes(props.appId));
+  if (!hasScheme) {
+    urlTypes.push({ CFBundleURLName: 'weixin', CFBundleURLSchemes: [props.appId] });
   }
+  plist.CFBundleURLTypes = urlTypes;
 
-  plist.LSApplicationQueriesSchemes = plist.LSApplicationQueriesSchemes ?? [];
-  for (const scheme of REQUIRED_QUERY_SCHEMES) {
-    if (!(plist.LSApplicationQueriesSchemes as string[]).includes(scheme)) {
-      (plist.LSApplicationQueriesSchemes as string[]).push(scheme);
-    }
-  }
+  const querySchemes = new Set((plist.LSApplicationQueriesSchemes ?? []) as string[]);
+  REQUIRED_QUERY_SCHEMES.forEach((scheme) => querySchemes.add(scheme));
+  plist.LSApplicationQueriesSchemes = [...querySchemes];
 
   if (props.universalLink) {
     plist.WXUniversalLink = props.universalLink;
   }
+  return plist;
 }
 
-const withWeChat: ConfigPlugin<WithWeChatProps> = (config, props) => {
-  if (!props?.appId) {
-    throw new Error('[@minqian/react-native-wechat-lib] "appId" prop is required');
+/** 纯函数：把 Universal Link 的域名加入 Associated Domains */
+export function applyEntitlements<T extends Record<string, unknown>>(
+  entitlements: T,
+  props: WithWeChatProps,
+): T {
+  if (!props.universalLink) return entitlements;
+  const host = new URL(props.universalLink).host;
+  const key = 'com.apple.developer.associated-domains';
+  const domains = new Set((entitlements[key] as string[] | undefined) ?? []);
+  domains.add(`applinks:${host}`);
+  (entitlements as Record<string, unknown>)[key] = [...domains];
+  return entitlements;
+}
+
+type Manifest = AndroidConfig.Manifest.AndroidManifest;
+
+/** 纯函数：注入微信回调 Activity 与 Android 11+ 的包可见性声明 */
+export function applyAndroidManifest(manifest: Manifest): Manifest {
+  const application = manifest.manifest.application?.[0];
+  if (!application) {
+    throw new Error(`[${PLUGIN_NAME}] AndroidManifest.xml has no <application> element`);
   }
 
-  const c = config as any;
+  application.activity = application.activity ?? [];
+  const hasEntry = application.activity.some(
+    (activity) => activity.$['android:name'] === '.wxapi.WXEntryActivity',
+  );
+  if (!hasEntry) {
+    application.activity.push({
+      $: {
+        'android:name': '.wxapi.WXEntryActivity',
+        'android:exported': 'true',
+        'android:launchMode': 'singleTask',
+        'android:taskAffinity': '${applicationId}',
+        'android:theme': '@android:style/Theme.Translucent.NoTitleBar',
+      },
+    });
+  }
 
-  // Register a synchronous infoPlist mod so tests can invoke it without async overhead.
-  if (!c.mods) c.mods = {};
-  if (!c.mods.ios) c.mods.ios = {};
+  const queries = (manifest.manifest.queries ?? []) as { package?: { $: { 'android:name': string } }[] }[];
+  const hasQuery = queries.some((query) =>
+    query.package?.some((pkg) => pkg.$['android:name'] === WECHAT_PACKAGE),
+  );
+  if (!hasQuery) {
+    queries.push({ package: [{ $: { 'android:name': WECHAT_PACKAGE } }] });
+  }
+  manifest.manifest.queries = queries as Manifest['manifest']['queries'];
+  return manifest;
+}
 
-  const prevMod: ((cfg: any) => any) | undefined = c.mods.ios.infoPlist;
+/** 生成 WXEntryActivity.kt 的源码：微信要求回调 Activity 位于 <applicationId>.wxapi 包下 */
+export function wxEntryActivitySource(applicationId: string): string {
+  return (
+    `package ${applicationId}.wxapi\n\n` +
+    `import com.minqian.wechatlib.WXEntryActivityBase\n\n` +
+    `class WXEntryActivity : WXEntryActivityBase()\n`
+  );
+}
 
-  c.mods.ios.infoPlist = (cfg: any) => {
-    // Chain any previously registered mod first
-    if (prevMod) cfg = prevMod(cfg);
-    const plist: Record<string, any> = cfg.modResults ?? {};
-    applyPlistMods(plist, props);
-    cfg.modResults = plist;
-    return cfg;
-  };
-
-  // Register a synchronous Android manifest mod (consistent with iOS approach above).
-  if (!c.mods.android) c.mods.android = {};
-
-  const prevAndroid: ((cfg: any) => any) | undefined = c.mods.android.manifest;
-
-  c.mods.android.manifest = (cfg: any) => {
-    if (prevAndroid) cfg = prevAndroid(cfg);
-    const manifest = cfg.modResults.manifest;
-
-    // Ensure application array and inject WXEntryActivity
-    manifest.application = manifest.application ?? [{}];
-    const app = manifest.application[0];
-    app.activity = app.activity ?? [];
-    const hasWxEntry = app.activity.some(
-      (a: any) => a.$?.['android:name'] === '.wxapi.WXEntryActivity',
-    );
-    if (!hasWxEntry) {
-      app.activity.push({
-        $: {
-          'android:name': '.wxapi.WXEntryActivity',
-          'android:exported': 'true',
-          'android:launchMode': 'singleTask',
-          'android:taskAffinity': '${applicationId}',
-          'android:theme': '@android:style/Theme.Translucent.NoTitleBar',
-        },
-      });
-    }
-
-    // Ensure queries element with com.tencent.mm package
-    manifest.queries = manifest.queries ?? [];
-    const hasWxQuery = manifest.queries.some((q: any) =>
-      JSON.stringify(q).includes('com.tencent.mm'),
-    );
-    if (!hasWxQuery) {
-      manifest.queries.push({
-        package: [{ $: { 'android:name': 'com.tencent.mm' } }],
-      });
-    }
-
-    return cfg;
-  };
-
-  // Register dangerous mod for WXEntryActivity.kt file generation
-  const prevDangerous = c.mods.android.dangerous as ((cfg: any) => any) | undefined;
-  c.mods.android.dangerous = async (cfg: any) => {
-    if (prevDangerous) cfg = await prevDangerous(cfg);
-
-    const projectRoot = cfg.modRequest.projectRoot;
-    const androidDir = path.join(projectRoot, 'android');
-    if (!fs.existsSync(androidDir)) {
-      return cfg; // no android project, skip
-    }
-
-    // Prefer reading applicationId from the config object (always correct),
-    // fall back to parsing build.gradle if not available.
-    let applicationId: string | undefined =
-      cfg.android?.package ?? cfg.modRequest?.packageName;
-
-    if (!applicationId) {
-      const appGradle = path.join(projectRoot, 'android', 'app', 'build.gradle');
-      if (!fs.existsSync(appGradle)) {
-        return cfg; // no android project, skip
-      }
-      const gradle = fs.readFileSync(appGradle, 'utf8');
-      const m = gradle.match(/applicationId\s*['"]([^'"]+)['"]/);
-      if (!m) {
-        throw new Error(
-          '[@minqian/react-native-wechat-lib] cannot find applicationId in android/app/build.gradle',
-        );
-      }
-      applicationId = m[1];
-    }
-    const pkgPath = applicationId.split('.').join(path.sep);
-    const dir = path.join(
-      projectRoot,
-      'android',
-      'app',
-      'src',
-      'main',
-      'java',
-      pkgPath,
-      'wxapi',
-    );
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, 'WXEntryActivity.kt');
-    if (!fs.existsSync(file)) {
-      fs.writeFileSync(
-        file,
-        `package ${applicationId}.wxapi\n\n` +
-          `import com.minqian.wechatlib.WXEntryActivityBase\n\n` +
-          `class WXEntryActivity : WXEntryActivityBase()\n`,
-      );
-    }
-    return cfg;
-  };
-
+const withWeChatIos: ConfigPlugin<WithWeChatProps> = (config, props) => {
+  config = withInfoPlist(config, (c) => {
+    c.modResults = applyInfoPlist(c.modResults, props);
+    return c;
+  });
+  if (props.universalLink) {
+    config = withEntitlementsPlist(config, (c) => {
+      c.modResults = applyEntitlements(c.modResults, props);
+      return c;
+    });
+  }
   return config;
 };
 
-export { withWeChat };
-export default createRunOncePlugin(withWeChat, '@minqian/react-native-wechat-lib', '0.1.0');
+const withWeChatAndroid: ConfigPlugin<WithWeChatProps> = (config) => {
+  config = withAndroidManifest(config, (c) => {
+    c.modResults = applyAndroidManifest(c.modResults);
+    return c;
+  });
+  // 回调 Activity 必须是宿主包名下的类，SDK 无法预置，因此在 prebuild 时生成源文件
+  config = withDangerousMod(config, [
+    'android',
+    (c) => {
+      const applicationId = c.android?.package;
+      if (!applicationId) {
+        throw new Error(`[${PLUGIN_NAME}] "android.package" must be set in the app config`);
+      }
+      const dir = path.join(
+        c.modRequest.platformProjectRoot,
+        'app',
+        'src',
+        'main',
+        'java',
+        ...applicationId.split('.'),
+        'wxapi',
+      );
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'WXEntryActivity.kt'), wxEntryActivitySource(applicationId));
+      return c;
+    },
+  ]);
+  return config;
+};
+
+const withWeChat: ConfigPlugin<WithWeChatProps> = (config, props) => {
+  if (!props?.appId) {
+    throw new Error(`[${PLUGIN_NAME}] "appId" is required`);
+  }
+  if (props.universalLink && !/^https:\/\/[^/?#]+\/.*\/$/.test(props.universalLink)) {
+    throw new Error(`[${PLUGIN_NAME}] "universalLink" must be an https URL ending with "/"`);
+  }
+  config = withWeChatIos(config, props);
+  config = withWeChatAndroid(config, props);
+  return config;
+};
+
+export default createRunOncePlugin(withWeChat, PLUGIN_NAME);

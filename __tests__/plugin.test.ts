@@ -1,120 +1,85 @@
-import withWeChat from '../plugin/src/withWeChat';
+import {
+  applyAndroidManifest,
+  applyEntitlements,
+  applyInfoPlist,
+  wxEntryActivitySource,
+} from '../plugin/src/withWeChat';
 
-function applyIOSPlistMod(config: any) {
-  const ios = config.mods?.ios?.infoPlist;
-  if (!ios) return config;
-  return ios({ ...config, modResults: { ...(config.ios?.infoPlist ?? {}) } });
-}
+const props = { appId: 'wxTEST', universalLink: 'https://example.com/wx/' };
 
-describe('withWeChat — iOS Info.plist', () => {
-  it('throws when appId is missing', () => {
-    expect(() => (withWeChat as any)({}, {})).toThrow(/appId/);
+describe('applyInfoPlist', () => {
+  it('injects URL scheme, query schemes and universal link', () => {
+    const plist = applyInfoPlist({}, props);
+    expect(plist.CFBundleURLTypes).toEqual([{ CFBundleURLName: 'weixin', CFBundleURLSchemes: ['wxTEST'] }]);
+    expect(plist.LSApplicationQueriesSchemes).toEqual(['weixin', 'weixinULAPI', 'weixinURLParamsAPI']);
+    expect(plist.WXUniversalLink).toBe('https://example.com/wx/');
   });
 
-  it('injects CFBundleURLSchemes, query schemes, universal link', () => {
-    let config: any = { ios: { infoPlist: {} }, name: 'x', slug: 'x' };
-    config = (withWeChat as any)(config, {
-      appId: 'wxTEST',
-      universalLink: 'https://example.com/wx/',
-    });
-    const out = applyIOSPlistMod(config);
-    expect(out.modResults.CFBundleURLTypes[0].CFBundleURLSchemes).toContain('wxTEST');
-    expect(out.modResults.LSApplicationQueriesSchemes).toEqual(
-      expect.arrayContaining(['weixin', 'weixinULAPI', 'weixinURLParamsAPI']),
+  it('is idempotent and keeps existing entries', () => {
+    const once = applyInfoPlist(
+      { CFBundleURLTypes: [{ CFBundleURLSchemes: ['myapp'] }], LSApplicationQueriesSchemes: ['weixin'] },
+      props,
     );
-    expect(out.modResults.WXUniversalLink).toBe('https://example.com/wx/');
+    const twice = applyInfoPlist(once, props);
+    expect(twice.CFBundleURLTypes).toHaveLength(2);
+    expect(twice.LSApplicationQueriesSchemes).toHaveLength(3);
   });
 
-  it('is idempotent over multiple runs', () => {
-    let config: any = { ios: { infoPlist: {} }, name: 'x', slug: 'x' };
-    config = (withWeChat as any)(config, { appId: 'wxTEST' });
-    config = (withWeChat as any)(config, { appId: 'wxTEST' });
-    const out = applyIOSPlistMod(config);
-    expect(out.modResults.CFBundleURLTypes.length).toBe(1);
-    expect(out.modResults.LSApplicationQueriesSchemes.length).toBe(3);
+  it('skips universal link when not provided', () => {
+    const plist = applyInfoPlist({}, { appId: 'wxTEST' });
+    expect(plist.WXUniversalLink).toBeUndefined();
   });
 });
 
-function applyAndroidManifestMod(config: any) {
-  const mod = config.mods?.android?.manifest;
-  if (!mod) return config;
-  return mod({
-    ...config,
-    modResults: emptyManifest(),
-  });
-}
-
-function emptyManifest() {
-  return {
-    manifest: {
-      $: { 'xmlns:android': 'http://schemas.android.com/apk/res/android', package: 'com.example.app' },
-      'uses-permission': [],
-      queries: [],
-      application: [{ $: { 'android:name': '.MainApplication' }, activity: [] }],
-    },
-  };
-}
-
-describe('withWeChat — AndroidManifest', () => {
-  it('adds WXEntryActivity into application', () => {
-    let config: any = { android: {}, ios: { infoPlist: {} }, name: 'x', slug: 'x' };
-    config = (withWeChat as any)(config, { appId: 'wxTEST' });
-    const out = applyAndroidManifestMod(config);
-    const activities = out.modResults.manifest.application[0].activity;
-    const wx = activities.find((a: any) => a.$['android:name'] === '.wxapi.WXEntryActivity');
-    expect(wx).toBeDefined();
-    expect(wx.$['android:exported']).toBe('true');
-    expect(wx.$['android:launchMode']).toBe('singleTask');
+describe('applyEntitlements', () => {
+  it('adds applinks for the universal link host', () => {
+    const entitlements = applyEntitlements<Record<string, unknown>>({}, props);
+    expect(entitlements['com.apple.developer.associated-domains']).toEqual(['applinks:example.com']);
   });
 
-  it('adds <queries><package> for com.tencent.mm', () => {
-    let config: any = { android: {}, ios: { infoPlist: {} }, name: 'x', slug: 'x' };
-    config = (withWeChat as any)(config, { appId: 'wxTEST' });
-    const out = applyAndroidManifestMod(config);
-    const queries = out.modResults.manifest.queries;
-    expect(JSON.stringify(queries)).toContain('com.tencent.mm');
+  it('does not duplicate an existing domain', () => {
+    const entitlements = applyEntitlements(
+      { 'com.apple.developer.associated-domains': ['applinks:example.com', 'applinks:other.com'] },
+      props,
+    );
+    expect(entitlements['com.apple.developer.associated-domains']).toEqual([
+      'applinks:example.com',
+      'applinks:other.com',
+    ]);
+  });
+
+  it('leaves entitlements untouched without a universal link', () => {
+    expect(applyEntitlements<Record<string, unknown>>({}, { appId: 'wxTEST' })).toEqual({});
   });
 });
 
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+describe('applyAndroidManifest', () => {
+  const manifest = () => ({ manifest: { $: {}, application: [{ $: { 'android:name': '.MainApplication' } }] } });
 
-function makeTempProject(applicationId = 'com.example.app') {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wxlib-'));
-  const appGradle = path.join(dir, 'android', 'app');
-  fs.mkdirSync(appGradle, { recursive: true });
-  fs.writeFileSync(
-    path.join(appGradle, 'build.gradle'),
-    `android { defaultConfig { applicationId "${applicationId}" } }`,
-  );
-  return dir;
-}
-
-function applyAndroidDangerousMod(config: any, projectRoot: string) {
-  const mod = config.mods?.android?.dangerous;
-  if (!mod) return config;
-  return mod({
-    ...config,
-    modRequest: { projectRoot, platformProjectRoot: path.join(projectRoot, 'android') },
-    modResults: {},
+  it('injects WXEntryActivity and the WeChat package query', () => {
+    const out = applyAndroidManifest(manifest() as any);
+    const activities = out.manifest.application?.[0]?.activity ?? [];
+    expect(activities).toHaveLength(1);
+    expect(activities[0]?.$['android:name']).toBe('.wxapi.WXEntryActivity');
+    expect(activities[0]?.$['android:exported']).toBe('true');
+    expect(JSON.stringify(out.manifest.queries)).toContain('com.tencent.mm');
   });
-}
 
-describe('withWeChat — WXEntryActivity.kt generation', () => {
-  it('generates a stub at <applicationId>/wxapi/WXEntryActivity.kt', async () => {
-    const projectRoot = makeTempProject('com.minqian.example');
-    let config: any = { android: {}, ios: { infoPlist: {} }, name: 'x', slug: 'x' };
-    config = (withWeChat as any)(config, { appId: 'wxTEST' });
-    await applyAndroidDangerousMod(config, projectRoot);
+  it('is idempotent', () => {
+    const out = applyAndroidManifest(applyAndroidManifest(manifest() as any));
+    expect(out.manifest.application?.[0]?.activity).toHaveLength(1);
+    expect(out.manifest.queries).toHaveLength(1);
+  });
 
-    const expectedPath = path.join(
-      projectRoot, 'android', 'app', 'src', 'main', 'java',
-      'com', 'minqian', 'example', 'wxapi', 'WXEntryActivity.kt',
-    );
-    expect(fs.existsSync(expectedPath)).toBe(true);
-    const content = fs.readFileSync(expectedPath, 'utf8');
-    expect(content).toContain('package com.minqian.example.wxapi');
-    expect(content).toContain('WXEntryActivityBase');
+  it('throws without an application element', () => {
+    expect(() => applyAndroidManifest({ manifest: { $: {} } } as any)).toThrow(/application/);
+  });
+});
+
+describe('wxEntryActivitySource', () => {
+  it('places the activity under <applicationId>.wxapi', () => {
+    const source = wxEntryActivitySource('com.example.app');
+    expect(source).toContain('package com.example.app.wxapi');
+    expect(source).toContain('class WXEntryActivity : WXEntryActivityBase()');
   });
 });

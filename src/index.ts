@@ -1,8 +1,13 @@
 import Native from './NativeWeChatModule';
-import { WeChatError } from './types';
-import type { AuthResponse, ShareResponse, ImageSource } from './types';
-import { WeChatScene, WeChatMiniProgramType } from './types';
 import { normalizeImageSource } from './normalize';
+import {
+  type AuthResponse,
+  type ImageSource,
+  type ShareResponse,
+  WeChatError,
+  WeChatMiniProgramType,
+  WeChatScene,
+} from './types';
 
 export * from './types';
 

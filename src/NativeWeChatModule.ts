@@ -1,4 +1,4 @@
-import { requireNativeModule, NativeModule } from 'expo-modules-core';
+import { NativeModule, requireNativeModule } from 'expo';
 
 export interface NativeWeChatModuleType extends NativeModule {
   registerApp(appId: string, universalLink: string | null): Promise<void>;
