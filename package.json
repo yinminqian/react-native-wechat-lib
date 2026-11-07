@@ -40,7 +40,7 @@
   "bugs": {
     "url": "https://github.com/yinminqian/react-native-wechat-lib/issues"
   },
-  "author": "Min Qian",
+  "author": "yinminqian <yinminqian@gmail.com>",
   "license": "MIT",
   "homepage": "https://github.com/yinminqian/react-native-wechat-lib#readme",
   "dependencies": {},
