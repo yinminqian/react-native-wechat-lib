@@ -20,7 +20,12 @@ jest.mock('../src/NativeWeChatModule', () => ({
   },
 }));
 
-import { addAuthListener, addShareListener } from '../src/events';
+import {
+  addAuthListener,
+  addLaunchFromWXListener,
+  addLaunchMiniProgramListener,
+  addShareListener,
+} from '../src/events';
 
 describe('event listeners', () => {
   beforeEach(() => {
@@ -39,6 +44,20 @@ describe('event listeners', () => {
     addShareListener(fn);
     listeners['onShareResp'][0]({ errCode: 0 });
     expect(fn).toHaveBeenCalledWith({ errCode: 0 });
+  });
+
+  it('addLaunchMiniProgramListener subscribes to onLaunchMiniProgramResp', () => {
+    const fn = jest.fn();
+    addLaunchMiniProgramListener(fn);
+    listeners['onLaunchMiniProgramResp'][0]({ errCode: 0, extMsg: 'from-mp' });
+    expect(fn).toHaveBeenCalledWith({ errCode: 0, extMsg: 'from-mp' });
+  });
+
+  it('addLaunchFromWXListener subscribes to onLaunchFromWX', () => {
+    const fn = jest.fn();
+    addLaunchFromWXListener(fn);
+    listeners['onLaunchFromWX'][0]({ messageExt: 'ext', identification: 'song-1' });
+    expect(fn).toHaveBeenCalledWith({ messageExt: 'ext', identification: 'song-1' });
   });
 
   it('returned unsubscribe stops the listener', () => {

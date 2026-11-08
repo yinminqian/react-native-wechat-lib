@@ -58,3 +58,6 @@ yarn-error.log
 
 # TypeScript build info
 *.tsbuildinfo
+
+# jest 覆盖率报告（含本机路径）
+coverage/

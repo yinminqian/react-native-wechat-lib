@@ -10,6 +10,10 @@ const nativeMock = {
   shareImage: jest.fn(),
   shareWebpage: jest.fn(),
   shareMiniProgram: jest.fn(),
+  launchMiniProgram: jest.fn(),
+  shareVideo: jest.fn(),
+  shareMusicVideo: jest.fn(),
+  shareFile: jest.fn(),
 };
 
 jest.mock('../src/NativeWeChatModule', () => ({
@@ -27,6 +31,10 @@ import {
   shareImage,
   shareWebpage,
   shareMiniProgram,
+  launchMiniProgram,
+  shareVideo,
+  shareMusicVideo,
+  shareFile,
   WeChatScene,
   WeChatMiniProgramType,
 } from '../src/index';
@@ -244,5 +252,237 @@ describe('shareMiniProgram', () => {
       withShareTicket: true,
       scene: WeChatScene.Session,
     });
+  });
+});
+
+describe('documented length limits on existing APIs', () => {
+  it('shareText rejects text over 10KB', async () => {
+    await expect(shareText({ text: 'a'.repeat(10 * 1024 + 1) })).rejects.toMatchObject({ code: 'INVALID_PARAM' });
+  });
+
+  it('shareWebpage rejects title over 512 bytes (UTF-8, CJK = 3 bytes)', async () => {
+    await expect(
+      shareWebpage({ webpageUrl: 'https://example.com', title: '中'.repeat(171) }),
+    ).rejects.toMatchObject({ code: 'INVALID_PARAM' });
+  });
+
+  it('shareWebpage accepts title of exactly 512 bytes', async () => {
+    nativeMock.shareWebpage.mockResolvedValue({ errCode: 0 });
+    await shareWebpage({ webpageUrl: 'https://example.com', title: 'a'.repeat(512) });
+    expect(nativeMock.shareWebpage).toHaveBeenCalled();
+  });
+});
+
+describe('launchMiniProgram', () => {
+  it('rejects missing userName', async () => {
+    await expect(launchMiniProgram({ userName: '' })).rejects.toMatchObject({ code: 'INVALID_PARAM' });
+  });
+
+  it('defaults path to null and type to Release', async () => {
+    nativeMock.launchMiniProgram.mockResolvedValue(undefined);
+    await launchMiniProgram({ userName: 'gh_abc' });
+    expect(nativeMock.launchMiniProgram).toHaveBeenCalledWith('gh_abc', null, WeChatMiniProgramType.Release);
+  });
+
+  it('forwards path and type', async () => {
+    nativeMock.launchMiniProgram.mockResolvedValue(undefined);
+    await launchMiniProgram({ userName: 'gh_abc', path: 'pages/x?a=1', miniProgramType: WeChatMiniProgramType.Preview });
+    expect(nativeMock.launchMiniProgram).toHaveBeenCalledWith('gh_abc', 'pages/x?a=1', WeChatMiniProgramType.Preview);
+  });
+
+  it('wraps native failure as SEND_FAIL', async () => {
+    nativeMock.launchMiniProgram.mockRejectedValue(new Error('sendReq returned false'));
+    await expect(launchMiniProgram({ userName: 'gh_abc' })).rejects.toMatchObject({ code: 'SEND_FAIL' });
+  });
+});
+
+describe('shareVideo', () => {
+  it('rejects when both urls are empty', async () => {
+    await expect(shareVideo({})).rejects.toMatchObject({ code: 'INVALID_PARAM' });
+  });
+
+  it('accepts only the low-band url', async () => {
+    nativeMock.shareVideo.mockResolvedValue({ errCode: 0 });
+    await shareVideo({ videoLowBandUrl: 'https://v/low.mp4' });
+    expect(nativeMock.shareVideo).toHaveBeenCalledWith(null, 'https://v/low.mp4', null, null, null, WeChatScene.Session);
+  });
+
+  it('forwards all fields', async () => {
+    nativeMock.shareVideo.mockResolvedValue({ errCode: 0 });
+    await shareVideo({
+      videoUrl: 'https://v/1.mp4',
+      videoLowBandUrl: 'https://v/1-low.mp4',
+      title: 'T',
+      description: 'D',
+      thumb: { uri: 'https://x/t.png' },
+      scene: WeChatScene.Timeline,
+    });
+    expect(nativeMock.shareVideo).toHaveBeenCalledWith(
+      'https://v/1.mp4',
+      'https://v/1-low.mp4',
+      'T',
+      'D',
+      { uri: 'https://x/t.png' },
+      WeChatScene.Timeline,
+    );
+  });
+
+  it('rejects video url over 10KB', async () => {
+    await expect(shareVideo({ videoUrl: 'https://v/' + 'a'.repeat(10 * 1024) })).rejects.toMatchObject({
+      code: 'INVALID_PARAM',
+    });
+  });
+});
+
+describe('shareMusicVideo', () => {
+  const ok = {
+    title: '歌曲',
+    musicUrl: 'https://m/page',
+    musicDataUrl: 'https://m/a.mp3',
+    singerName: '歌手',
+    duration: 120000,
+  };
+
+  it.each(['title', 'musicUrl', 'musicDataUrl', 'singerName'] as const)('rejects missing %s', async (key) => {
+    await expect(shareMusicVideo({ ...ok, [key]: '' })).rejects.toMatchObject({ code: 'INVALID_PARAM' });
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])('rejects invalid duration %p', async (duration) => {
+    await expect(shareMusicVideo({ ...ok, duration })).rejects.toMatchObject({ code: 'INVALID_PARAM' });
+  });
+
+  it('rejects messageExt over 2KB', async () => {
+    await expect(shareMusicVideo({ ...ok, messageExt: 'a'.repeat(2049) })).rejects.toMatchObject({
+      code: 'INVALID_PARAM',
+    });
+  });
+
+  it('forwards required fields with nulls and Session default', async () => {
+    nativeMock.shareMusicVideo.mockResolvedValue({ errCode: 0 });
+    await shareMusicVideo(ok);
+    expect(nativeMock.shareMusicVideo).toHaveBeenCalledWith({
+      ...ok,
+      description: null,
+      songLyric: null,
+      albumName: null,
+      musicGenre: null,
+      issueDate: null,
+      identification: null,
+      messageExt: null,
+      thumb: null,
+      scene: WeChatScene.Session,
+    });
+  });
+
+  it('forwards optional fields', async () => {
+    nativeMock.shareMusicVideo.mockResolvedValue({ errCode: 0 });
+    await shareMusicVideo({
+      ...ok,
+      description: 'D',
+      songLyric: '[00:00]la',
+      albumName: 'A',
+      musicGenre: 'Pop',
+      issueDate: 1611116532,
+      identification: 'song-1',
+      messageExt: 'ext',
+      thumb: { base64: 'AAAA' },
+      scene: WeChatScene.Favorite,
+    });
+    expect(nativeMock.shareMusicVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        songLyric: '[00:00]la',
+        issueDate: 1611116532,
+        identification: 'song-1',
+        messageExt: 'ext',
+        thumb: { base64: 'AAAA' },
+        scene: WeChatScene.Favorite,
+      }),
+    );
+  });
+});
+
+describe('shareFile', () => {
+  it('rejects missing file', async () => {
+    await expect(
+      shareFile({ file: { uri: '' }, title: 'a.pdf' }),
+    ).rejects.toMatchObject({ code: 'INVALID_PARAM' });
+  });
+
+  it('infers extension from uri, ignoring query and hash', async () => {
+    nativeMock.shareFile.mockResolvedValue({ errCode: 0 });
+    await shareFile({ file: { uri: 'https://f/docs/report.pdf?x=1#p2' }, title: 'report.pdf' });
+    expect(nativeMock.shareFile).toHaveBeenCalledWith(
+      { uri: 'https://f/docs/report.pdf?x=1#p2' },
+      'pdf',
+      'report.pdf',
+      null,
+      null,
+      WeChatScene.Session,
+    );
+  });
+
+  it('requires fileExtension for base64 data', async () => {
+    await expect(shareFile({ file: { base64: 'AAAA' }, title: 'x' })).rejects.toMatchObject({
+      code: 'INVALID_PARAM',
+    });
+  });
+
+  it('rejects uri without extension when none given', async () => {
+    await expect(shareFile({ file: { uri: 'file:///tmp/noext' }, title: 'x' })).rejects.toMatchObject({
+      code: 'INVALID_PARAM',
+    });
+  });
+
+  it('rejects missing title', async () => {
+    await expect(shareFile({ file: { uri: 'file:///tmp/a.pdf' }, title: '' })).rejects.toMatchObject({
+      code: 'INVALID_PARAM',
+    });
+  });
+
+  it('forwards explicit extension and optional fields', async () => {
+    nativeMock.shareFile.mockResolvedValue({ errCode: 0 });
+    await shareFile({
+      file: { base64: 'AAAA' },
+      fileExtension: 'docx',
+      title: 'a.docx',
+      description: 'D',
+      thumb: { uri: 'https://x/t.png' },
+      scene: WeChatScene.Favorite,
+    });
+    expect(nativeMock.shareFile).toHaveBeenCalledWith(
+      { base64: 'AAAA' },
+      'docx',
+      'a.docx',
+      'D',
+      { uri: 'https://x/t.png' },
+      WeChatScene.Favorite,
+    );
+  });
+});
+
+describe('native failures are wrapped as WeChatError(SEND_FAIL)', () => {
+  const cases: [string, keyof typeof nativeMock, () => Promise<unknown>][] = [
+    ['sendAuthRequest', 'sendAuthRequest', () => sendAuthRequest()],
+    ['shareText', 'shareText', () => shareText({ text: 'hi' })],
+    ['shareImage', 'shareImage', () => shareImage({ image: { base64: 'AAAA' } })],
+    ['shareWebpage', 'shareWebpage', () => shareWebpage({ webpageUrl: 'https://h.com' })],
+    ['shareMiniProgram', 'shareMiniProgram', () => shareMiniProgram({ webpageUrl: 'https://h.com', userName: 'gh_a' })],
+    ['shareVideo', 'shareVideo', () => shareVideo({ videoUrl: 'https://v/1.mp4' })],
+    [
+      'shareMusicVideo',
+      'shareMusicVideo',
+      () => shareMusicVideo({ title: 't', musicUrl: 'https://m', musicDataUrl: 'https://m/a.mp3', singerName: 's', duration: 1 }),
+    ],
+    ['shareFile', 'shareFile', () => shareFile({ file: { uri: 'file:///a.pdf' }, title: 'a.pdf' })],
+  ];
+
+  it.each(cases)('%s', async (_name, key, call) => {
+    nativeMock[key].mockRejectedValue('native boom');
+    await expect(call()).rejects.toMatchObject({ code: 'SEND_FAIL', message: 'native boom' });
+  });
+
+  it('keeps an existing WeChatError as is', async () => {
+    nativeMock.shareText.mockRejectedValue(new WeChatError('NOT_REGISTERED', 'register first'));
+    await expect(shareText({ text: 'hi' })).rejects.toMatchObject({ code: 'NOT_REGISTERED' });
   });
 });

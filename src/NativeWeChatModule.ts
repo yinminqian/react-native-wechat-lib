@@ -33,6 +33,39 @@ export interface NativeWeChatModuleType extends NativeModule {
     withShareTicket?: boolean;
     scene: number;
   }): Promise<{ errCode: number; errStr?: string; type?: number }>;
+  launchMiniProgram(userName: string, path: string | null, miniProgramType: number): Promise<void>;
+  shareVideo(
+    videoUrl: string | null,
+    videoLowBandUrl: string | null,
+    title: string | null,
+    description: string | null,
+    thumb: { uri?: string; base64?: string } | null,
+    scene: number,
+  ): Promise<{ errCode: number; errStr?: string; type?: number }>;
+  shareMusicVideo(opts: {
+    title: string;
+    musicUrl: string;
+    musicDataUrl: string;
+    singerName: string;
+    duration: number;
+    description: string | null;
+    songLyric: string | null;
+    albumName: string | null;
+    musicGenre: string | null;
+    issueDate: number | null;
+    identification: string | null;
+    messageExt: string | null;
+    thumb: { uri?: string; base64?: string } | null;
+    scene: number;
+  }): Promise<{ errCode: number; errStr?: string; type?: number }>;
+  shareFile(
+    file: { uri?: string; base64?: string },
+    fileExtension: string,
+    title: string,
+    description: string | null,
+    thumb: { uri?: string; base64?: string } | null,
+    scene: number,
+  ): Promise<{ errCode: number; errStr?: string; type?: number }>;
 }
 
 // Use a lazy proxy so that module-level import does not throw when the
@@ -49,6 +82,10 @@ function getNative(): NativeWeChatModuleType {
 
 export default new Proxy({} as NativeWeChatModuleType, {
   get(_target, prop: string) {
-    return (getNative() as any)[prop];
+    const native = getNative();
+    const value = (native as any)[prop];
+    // 方法必须绑定回原生模块：经代理调用时 this 会是 Proxy，
+    // addListener 等依赖原生状态的 HostFunction 会抛 "native state unsupported on Proxy"
+    return typeof value === 'function' ? value.bind(native) : value;
   },
 });

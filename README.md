@@ -82,9 +82,25 @@ await WeChat.shareWebpage({
 | `shareImage({ image, scene? })` | 分享图片，`image` 为 `{ uri }` 或 `{ base64 }` |
 | `shareWebpage({ webpageUrl, title?, description?, thumb?, scene? })` | 分享网页 |
 | `shareMiniProgram({ webpageUrl, userName, path?, ... })` | 分享小程序（仅会话） |
+| `shareVideo({ videoUrl?, videoLowBandUrl?, title?, description?, thumb?, scene? })` | 分享视频链接，两个链接至少填一个 |
+| `shareMusicVideo({ title, musicUrl, musicDataUrl, singerName, duration, ... })` | 分享音乐视频，需先向微信申请权限（见下文） |
+| `shareFile({ file, fileExtension?, title, description?, thumb?, scene? })` | 分享文件（如 PDF），`file` 为 `{ uri }` 或 `{ base64 }` |
+| `launchMiniProgram({ userName, path?, miniProgramType? })` | 拉起小程序，请求发出即返回 |
 | `addAuthListener(fn)` / `addShareListener(fn)` | 监听授权 / 分享回调，返回取消函数 |
+| `addLaunchMiniProgramListener(fn)` | 小程序跳回 App 时回调，`extMsg` 为小程序按钮的 `app-parameter` |
+| `addLaunchFromWXListener(fn)` | 从微信跳回 App 时回调（如音乐视频播放器），带回 `messageExt` / `identification` |
 
 错误以 `WeChatError` 抛出，`code` 为 `NOT_REGISTERED` / `NOT_INSTALLED` / `INVALID_PARAM` / `SEND_FAIL`。
+
+### 限制与说明（来自微信开放平台文档）
+
+- 字段上限：标题 512 字节、描述 1KB、文本 / 链接 10KB（UTF-8），超限时抛出 `INVALID_PARAM`。
+- 缩略图上限 32KB、小程序封面 128KB，本库会自动压缩；Android 图片以二进制分享时上限 1MB，超出会压缩。
+- 文件：iOS 上限 10MB；Android 以二进制数据分享，不需要 FileProvider。官方示例的场景是会话，其他场景以微信客户端校验为准。
+- 音乐视频：需按文档发邮件给微信申请「音乐类型」与「音乐视频类型」分享权限，未开通时微信会拒绝。
+- 拉起小程序：已认证的开放平台账号可拉起任意合法小程序；App 未上架时每天最多 100 次。只有小程序通过 `<button open-type="launchApp">` 跳回时才会有 `onLaunchMiniProgramResp` 回调。
+- App 未上架时，每个平台每天分享上限 100 次。
+- 表情、普通音乐类型不在官方文档内，本库不提供。
 
 ## 在宿主应用里优雅降级
 

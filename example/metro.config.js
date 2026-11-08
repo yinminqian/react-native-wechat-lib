@@ -19,7 +19,7 @@ config.resolver.nodeModulesPaths = [
 ];
 
 config.resolver.extraNodeModules = {
-  'react-native-wechat-lib': '..',
+  '@minqian/react-native-wechat-lib': '..',
 };
 
 config.watchFolders = [path.resolve(__dirname, '..')];

@@ -19,6 +19,25 @@ object WeChatBridge {
   @Volatile var module: ReactNativeWechatLibModule? = null
   @Volatile var pendingAuth: CompletableDeferred<Map<String, Any?>>? = null
   @Volatile var pendingShare: CompletableDeferred<Map<String, Any?>>? = null
+  /** 从微信跳回 App 的请求：JS 还没开始监听时（如被微信冷启动）先存着，开始监听后补发 */
+  @Volatile var pendingLaunchFromWX: Map<String, Any?>? = null
+
+  /** 微信开放平台文档规定的大小上限 */
+  const val THUMB_MAX_BYTES = 32 * 1024                 // WXMediaMessage.thumbData
+  const val MINI_PROGRAM_IMAGE_MAX_BYTES = 128 * 1024  // 小程序消息封面
+  const val IMAGE_DATA_MAX_BYTES = 1024 * 1024         // WXImageObject.imageData（Android）
+
+  fun emitLaunchFromWX(payload: Map<String, Any?>) {
+    val m = module
+    if (m != null) m.emit("onLaunchFromWX", payload) else pendingLaunchFromWX = payload
+  }
+
+  fun flushPendingLaunchFromWX() {
+    val payload = pendingLaunchFromWX ?: return
+    val m = module ?: return
+    pendingLaunchFromWX = null
+    m.emit("onLaunchFromWX", payload)
+  }
 
   fun register(context: Context, appId: String) {
     val a = WXAPIFactory.createWXAPI(context.applicationContext, appId, true)
@@ -57,15 +76,26 @@ object WeChatBridge {
     }
   }
 
-  fun compressThumb(data: ByteArray, maxKB: Int = 32): ByteArray {
-    val bmp = BitmapFactory.decodeByteArray(data, 0, data.size) ?: return data
+  fun compressThumb(data: ByteArray): ByteArray = compressImage(data, THUMB_MAX_BYTES)
+
+  /** 依次降低 JPEG 质量、缩小尺寸，直到不超过 maxBytes；本来就不超过或不是图片时原样返回 */
+  fun compressImage(data: ByteArray, maxBytes: Int): ByteArray {
+    if (data.size <= maxBytes) return data
+    var bmp = BitmapFactory.decodeByteArray(data, 0, data.size) ?: return data
+    var best = data
     val bos = ByteArrayOutputStream()
-    var q = 90
-    do {
-      bos.reset()
-      bmp.compress(Bitmap.CompressFormat.JPEG, q, bos)
-      q -= 10
-    } while (bos.size() > maxKB * 1024 && q > 10)
-    return bos.toByteArray()
+    repeat(8) {
+      for (q in intArrayOf(80, 60, 40, 20)) {
+        bos.reset()
+        bmp.compress(Bitmap.CompressFormat.JPEG, q, bos)
+        if (bos.size() <= maxBytes) return bos.toByteArray()
+        if (bos.size() < best.size) best = bos.toByteArray()
+      }
+      val w = (bmp.width * 0.7).toInt()
+      val h = (bmp.height * 0.7).toInt()
+      if (w < 16 || h < 16) return best
+      bmp = Bitmap.createScaledBitmap(bmp, w, h, true)
+    }
+    return best
   }
 }

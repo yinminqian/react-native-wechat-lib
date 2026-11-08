@@ -1,4 +1,4 @@
-import {
+import withWeChat, {
   applyAndroidManifest,
   applyEntitlements,
   applyInfoPlist,
@@ -81,5 +81,25 @@ describe('wxEntryActivitySource', () => {
     const source = wxEntryActivitySource('com.example.app');
     expect(source).toContain('package com.example.app.wxapi');
     expect(source).toContain('class WXEntryActivity : WXEntryActivityBase()');
+  });
+});
+
+describe('withWeChat (plugin entry)', () => {
+  // createRunOncePlugin 会在配置对象上记录已执行，每次调用用新的对象
+  const baseConfig = () => ({ name: 'demo', slug: 'demo', android: { package: 'com.example.demo' } });
+
+  it('requires appId', () => {
+    expect(() => withWeChat(baseConfig(), { appId: '' })).toThrow(/appId/);
+  });
+
+  it('rejects a universal link that is not https or lacks the trailing slash', () => {
+    expect(() => withWeChat(baseConfig(), { appId: 'wx1', universalLink: 'http://example.com/wx/' })).toThrow(/universalLink/);
+    expect(() => withWeChat(baseConfig(), { appId: 'wx1', universalLink: 'https://example.com/wx' })).toThrow(/universalLink/);
+  });
+
+  it('registers iOS and Android mods for a valid config', () => {
+    const out = withWeChat(baseConfig(), props) as { mods?: Record<string, Record<string, unknown>> };
+    expect(Object.keys(out.mods?.ios ?? {})).toEqual(expect.arrayContaining(['infoPlist', 'entitlements']));
+    expect(Object.keys(out.mods?.android ?? {})).toEqual(expect.arrayContaining(['manifest', 'dangerous']));
   });
 });

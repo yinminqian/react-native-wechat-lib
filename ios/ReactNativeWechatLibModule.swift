@@ -4,7 +4,14 @@ public class ReactNativeWechatLibModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ReactNativeWechatLib")
 
-    Events("onAuthResp", "onShareResp")
+    Events("onAuthResp", "onShareResp", "onLaunchMiniProgramResp", "onLaunchFromWX")
+
+    // 被微信冷启动时，跳回请求先于 JS 监听到达，开始监听后补发
+    OnStartObserving("onLaunchFromWX") {
+      Task { @MainActor in
+        WeChatBridge.shared.flushPendingLaunchFromWX()
+      }
+    }
 
     OnCreate {
       Task { @MainActor in
@@ -47,6 +54,18 @@ public class ReactNativeWechatLibModule: Module {
     }
     AsyncFunction("shareMiniProgram") { (opts: [String: Any?]) async throws in
       try await WeChatBridge.shared.shareMiniProgram(opts: opts)
+    }
+    AsyncFunction("launchMiniProgram") { (userName: String, path: String?, type: Int) async throws in
+      try await WeChatBridge.shared.launchMiniProgram(userName: userName, path: path, type: type)
+    }
+    AsyncFunction("shareVideo") { (videoUrl: String?, lowBandUrl: String?, title: String?, description: String?, thumb: [String: Any?]?, scene: Int) async throws in
+      try await WeChatBridge.shared.shareVideo(videoUrl: videoUrl, lowBandUrl: lowBandUrl, title: title, description: description, thumb: thumb, scene: scene)
+    }
+    AsyncFunction("shareMusicVideo") { (opts: [String: Any?]) async throws in
+      try await WeChatBridge.shared.shareMusicVideo(opts: opts)
+    }
+    AsyncFunction("shareFile") { (file: [String: Any?], fileExtension: String, title: String, description: String?, thumb: [String: Any?]?, scene: Int) async throws in
+      try await WeChatBridge.shared.shareFile(file: file, fileExtension: fileExtension, title: title, description: description, thumb: thumb, scene: scene)
     }
   }
 
